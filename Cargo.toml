@@ -1,0 +1,22 @@
+[package]
+name = "laidlaw"
+authors = ["Montessquio"]
+homepage = "https://monty.sh/project/laidlaw"
+repository = ""
+version = "0.2.5"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.0.18", features = ["derive"] }
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1.21", features = ["full"] }
+tokio-stream = "0.1"
+tracing = "0.1.36"
+tracing-subscriber = "0.3"
+nu-json = "0.70.0"
+serde_json = "1.0"
+walkdir = "2"
