@@ -7,6 +7,8 @@ use walkdir::{WalkDir, DirEntry};
 use std::collections::HashMap;
 use std::path::{PathBuf, Path};
 
+use crate::RecordMeta;
+
 async fn deserialize_hjson(path: PathBuf) -> Result<HashMap<String, serde_json::Value>> {
     let mut ret: HashMap<String, serde_json::Value> = HashMap::new();
     let deser: HashMap<String, nu_json::Value> = nu_json::from_str(&tokio::fs::read_to_string(path).await?)?;
@@ -42,9 +44,7 @@ fn map_value(hjson: nu_json::Value) -> serde_json::Value {
     }
 }
 
-
-pub async fn deserialize_sources<A: AsRef<Path>>(source_path: A) -> Result<Vec<(DirEntry, HashMap<String, serde_json::Value>)>> {
-        
+pub async fn deserialize_sources<A: AsRef<Path>>(source_path: A) -> Result<Vec<crate::Record>> {
     // Enumerate all .hjson and .json files and their paths.
     let (json_data, hjson_data) = {
         let mut json_data: Vec<DirEntry> = Vec::new();
@@ -58,10 +58,12 @@ pub async fn deserialize_sources<A: AsRef<Path>>(source_path: A) -> Result<Vec<(
                     |s| (*s).to_str().unwrap_or("")
                 );
             if ext == "json" {
-                json_data.push(entry);
+                json_data.push(entry);          
+                event!(Level::DEBUG, "type" = "json", path = json_data.last().unwrap().clone().into_path().to_str(), "Enumerated source file");
             } 
             else if ext == "hjson" {
                 hjson_data.push(entry);
+                event!(Level::DEBUG, "type" = "hjson", path = hjson_data.last().unwrap().clone().into_path().to_str(), "Enumerated source file");
             }
         }
         (json_data, hjson_data)
@@ -86,11 +88,17 @@ pub async fn deserialize_sources<A: AsRef<Path>>(source_path: A) -> Result<Vec<(
 
     let (errs, data) = {
         let mut errs: Vec<(DirEntry, anyhow::Error)> = Vec::new();
-        let mut data: Vec<(DirEntry, HashMap<String, serde_json::Value>)> = Vec::new();
+        let mut data: Vec<crate::Record> = Vec::new();
         // Sort join-futures by their results into ok and error vecs.
         while let Some(value) = tasks.next().await {
             match value.await {
-                (k, Ok(Ok(v))) => data.push((k, v)),
+                (k, Ok(Ok(v))) => {
+                    if v.len() != 1 {
+                        bail!("Files must have exactly one top-level type attribute")
+                    }
+                    data.push(crate::Record{ meta: RecordMeta::new(k, &v), content: v});
+                    event!(Level::DEBUG, meta = format!("{}", data.last().unwrap().meta), "Read Record");
+                },
                 (k, Ok(Err(e))) => errs.push((k, anyhow!(e))),
                 (k, Err(e)) => errs.push((k, anyhow!(e))),
             }

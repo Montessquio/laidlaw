@@ -6,15 +6,15 @@
 use tracing::{Level, event};
 use tracing_subscriber::FmtSubscriber;
 use anyhow::{Result, bail};
-use std::path::PathBuf;
+use walkdir::DirEntry;
+use std::{path::PathBuf, collections::HashMap};
 use clap::{Parser};
 
 /// Read files from a directory and convert them
 /// to a vector of common dictionary types.
 mod deserialize;
 
-/// Take parsed data and do stuff to it.
-mod processing;
+mod extensions;
 
 /// Save vectors of common dictionary types
 /// to files as JSON.
@@ -30,7 +30,55 @@ Overall program control flow:
 5. Flatten and save files.
 */
 
-static LONG_ABOUT: &str = r#""#;
+#[derive(Debug)]
+pub struct Record {
+    pub meta: RecordMeta,
+    pub content: HashMap<String, serde_json::Value>
+}
+
+#[derive(Clone, Debug)]
+pub struct RecordMeta {
+    /// File Metadata of the source file
+    pub source_meta: DirEntry,
+
+    /// The declared type of the file.
+    /// This is equal to the first and
+    /// only root key in the file.
+    pub soft_type: String,
+    
+    // The number of elements in the
+    // file's root element list.
+    pub elements: usize,
+}
+
+impl std::fmt::Display for RecordMeta {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, 
+            "RecordMeta{{path: '{1}', type: '{0}'}}", 
+            self.soft_type,
+            self.source_meta.path().to_str()
+             .unwrap_or(
+                &format!(
+                    "<InvalidPath '{:?}'>", 
+                    self.source_meta.path()
+                )
+            )
+        )
+    }
+}
+
+impl RecordMeta {
+    pub fn new(dir: DirEntry, data: &HashMap<String, serde_json::Value>) -> Self {
+        let contents = data.iter().next().expect("Data file must have exactly one top-level element!");
+        RecordMeta {
+            source_meta: dir,
+            soft_type: contents.0.to_owned(),
+            elements: contents.1.as_array().expect("The root element in a data file must be a List!").len(),
+        }
+    }
+}
+
+static LONG_ABOUT: &str = r#"Reshape your mod: Laidlaw will transform a variety of object description formats into Cultist Simulator JSON, and applies helpful extensions as well."#;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, about = "Reshape your mod: Laidlaw will transform a variety of object description formats into Cultist Simulator JSON, and applies helpful extensions as well.", long_about = LONG_ABOUT)]
@@ -50,6 +98,8 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    if let Err(e) = color_eyre::install() { bail!(e) };
+
     let cli = Args::parse();
 
     let level = if cli.verbose > 0 {
@@ -92,10 +142,10 @@ async fn main() -> Result<()> {
     let data = deserialize::deserialize_sources(&source_dir).await?;
 
     // Manipulate data
-    let data = processing::execute_pipeline(data).await?;
+    let data = extensions::execute_pipeline(data).await?;
 
     // Save data
-    serialize::serialize_sources(data).await?;
+    serialize::serialize_sources(&cli.mod_root, data, cli.namespace).await?;
 
     Ok(())
 }
